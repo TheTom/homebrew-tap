@@ -17,8 +17,10 @@ jobs:
 
       - name: Tap and build bottle
         run: |
-          # Register this checkout as a proper tap
-          brew tap TheTom/tap "$GITHUB_WORKSPACE"
+          # Link this checkout into Homebrew's tap directory
+          TAP_DIR="$(brew --repository)/Library/Taps/thetom/homebrew-tap"
+          rm -rf "$TAP_DIR"
+          ln -s "$GITHUB_WORKSPACE" "$TAP_DIR"
 
           # Build the formula as a bottle
           brew install --build-bottle TheTom/tap/vllm-swift
