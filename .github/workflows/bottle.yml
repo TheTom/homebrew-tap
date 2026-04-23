@@ -25,7 +25,10 @@ jobs:
           # Clone vllm-swift and build directly (not through Homebrew)
           git clone https://github.com/TheTom/vllm-swift.git /tmp/vllm-swift
           cd /tmp/vllm-swift/swift
-          swift build -c release 2>&1 | tail -5
+          # -Xswiftc flags suppress strict concurrency warnings promoted to errors in Swift 6.2+
+          swift build -c release \
+            -Xswiftc -strict-concurrency=targeted \
+            2>&1 | tail -10
 
           # Verify dylib
           ls -la .build/arm64-apple-macosx/release/libVLLMBridge.dylib
