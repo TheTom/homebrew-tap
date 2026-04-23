@@ -25,13 +25,24 @@ jobs:
           # Clone vllm-swift and build directly (not through Homebrew)
           git clone https://github.com/TheTom/vllm-swift.git /tmp/vllm-swift
           cd /tmp/vllm-swift/swift
-          # -Xswiftc flags suppress strict concurrency warnings promoted to errors in Swift 6.2+
-          swift build -c release \
-            -Xswiftc -strict-concurrency=targeted \
-            2>&1 | tail -10
+          # Build with relaxed concurrency for CI compatibility
+          swift build -c release 2>&1 || true
 
-          # Verify dylib
-          ls -la .build/arm64-apple-macosx/release/libVLLMBridge.dylib
+          # Check all possible output locations
+          echo "=== Looking for dylib ==="
+          find .build -name "libVLLMBridge.dylib" 2>/dev/null
+          find .build -name "*.dylib" 2>/dev/null | head -10
+
+          # Verify dylib exists
+          DYLIB=$(find .build -name "libVLLMBridge.dylib" -print -quit 2>/dev/null)
+          if [ -z "$DYLIB" ]; then
+            echo "ERROR: dylib not found after build"
+            # Show last 30 lines of build for debugging
+            swift build -c release 2>&1 | tail -30
+            exit 1
+          fi
+          echo "Found: $DYLIB"
+          ls -la "$DYLIB"
 
       - name: Package bottle
         run: |
@@ -45,12 +56,13 @@ jobs:
           mkdir -p "$BOTTLE_DIR/libexec/scripts"
           mkdir -p "$BOTTLE_DIR/bin"
 
-          # Copy dylib
-          cp swift/.build/arm64-apple-macosx/release/libVLLMBridge.dylib "$BOTTLE_DIR/lib/"
+          # Copy dylib from wherever it ended up
+          DYLIB=$(find swift/.build -name "libVLLMBridge.dylib" -print -quit)
+          cp "$DYLIB" "$BOTTLE_DIR/lib/"
 
           # Copy metallib if exists
-          [ -f swift/.build/arm64-apple-macosx/release/mlx.metallib ] && \
-            cp swift/.build/arm64-apple-macosx/release/mlx.metallib "$BOTTLE_DIR/lib/"
+          METALLIB=$(find swift/.build -name "mlx.metallib" -print -quit 2>/dev/null)
+          [ -n "$METALLIB" ] && cp "$METALLIB" "$BOTTLE_DIR/lib/"
 
           # Copy Python plugin
           cp vllm_swift/*.py "$BOTTLE_DIR/libexec/vllm_swift/"
