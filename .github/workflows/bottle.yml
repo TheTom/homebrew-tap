@@ -1,0 +1,88 @@
+name: Build Bottles
+
+on:
+  push:
+    paths:
+      - 'Formula/*.rb'
+  workflow_dispatch:
+
+jobs:
+  bottle:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+
+      - name: Build bottle
+        run: |
+          brew install --build-bottle Formula/vllm-swift.rb
+          brew bottle --json --root-url="https://github.com/TheTom/homebrew-tap/releases/download/bottles" Formula/vllm-swift.rb
+
+      - name: Upload bottle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bottle
+          path: |
+            *.bottle.*
+            *.json
+
+      - name: Create release and upload bottle
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Create or update the bottles release
+          gh release create bottles --title "Bottles" --notes "Prebuilt Homebrew bottles" 2>/dev/null || true
+
+          # Upload bottle files
+          for f in *.bottle.tar.gz; do
+            gh release upload bottles "$f" --clobber
+          done
+
+          # Update formula with bottle block
+          BOTTLE_FILE=$(ls *.bottle.tar.gz | head -1)
+          SHA=$(shasum -a 256 "$BOTTLE_FILE" | awk '{print $1}')
+
+          # Extract OS version from filename
+          OS_TAG=$(echo "$BOTTLE_FILE" | grep -o 'arm64_[a-z]*')
+
+          echo "Bottle SHA: $SHA"
+          echo "OS tag: $OS_TAG"
+          echo "File: $BOTTLE_FILE"
+
+          # Write updated formula with bottle block
+          python3 - "$SHA" "$OS_TAG" <<'PYEOF'
+          import sys, re
+          sha, os_tag = sys.argv[1], sys.argv[2]
+
+          with open("Formula/vllm-swift.rb") as f:
+              content = f.read()
+
+          bottle_block = f'''
+            bottle do
+              root_url "https://github.com/TheTom/homebrew-tap/releases/download/bottles"
+              sha256 cellar: :any, {os_tag}: "{sha}"
+            end
+          '''
+
+          # Remove existing bottle block if present
+          content = re.sub(r'\n  bottle do.*?end\n', '\n', content, flags=re.DOTALL)
+
+          # Insert after license line
+          content = content.replace(
+              '  license "Apache-2.0"',
+              '  license "Apache-2.0"\n' + bottle_block
+          )
+
+          with open("Formula/vllm-swift.rb", "w") as f:
+              f.write(content)
+          PYEOF
+
+          # Commit updated formula
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/vllm-swift.rb
+          git diff --cached --quiet || git commit -m "bottle: update SHA for $(uname -m)"
+          git push
