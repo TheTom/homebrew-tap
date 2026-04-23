@@ -12,42 +12,127 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Homebrew
-        uses: Homebrew/actions/setup-homebrew@main
-
-      - name: Tap and build bottle
-        env:
-          HOMEBREW_NO_SANDBOX: 1
+      - name: Select Xcode
         run: |
-          # Link this checkout into Homebrew's tap directory
-          TAP_DIR="$(brew --repository)/Library/Taps/thetom/homebrew-tap"
-          rm -rf "$TAP_DIR"
-          ln -s "$GITHUB_WORKSPACE" "$TAP_DIR"
+          # Use latest available Xcode
+          XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          echo "Using $XCODE"
+          sudo xcode-select -s "$XCODE"
+          swift --version
 
-          # Build the formula as a bottle (no sandbox — Swift SPM needs filesystem access)
-          brew install --build-bottle TheTom/tap/vllm-swift
+      - name: Build Swift bridge
+        run: |
+          # Clone vllm-swift and build directly (not through Homebrew)
+          git clone https://github.com/TheTom/vllm-swift.git /tmp/vllm-swift
+          cd /tmp/vllm-swift/swift
+          swift build -c release 2>&1 | tail -5
 
-          # Create the bottle tarball
-          brew bottle --json --root-url="https://github.com/TheTom/homebrew-tap/releases/download/bottles" TheTom/tap/vllm-swift
+          # Verify dylib
+          ls -la .build/arm64-apple-macosx/release/libVLLMBridge.dylib
+
+      - name: Package bottle
+        run: |
+          cd /tmp/vllm-swift
+
+          # Create bottle directory structure
+          VERSION="0.1.0"
+          BOTTLE_DIR="/tmp/bottle/vllm-swift/$VERSION"
+          mkdir -p "$BOTTLE_DIR/lib"
+          mkdir -p "$BOTTLE_DIR/libexec/vllm_swift"
+          mkdir -p "$BOTTLE_DIR/libexec/scripts"
+          mkdir -p "$BOTTLE_DIR/bin"
+
+          # Copy dylib
+          cp swift/.build/arm64-apple-macosx/release/libVLLMBridge.dylib "$BOTTLE_DIR/lib/"
+
+          # Copy metallib if exists
+          [ -f swift/.build/arm64-apple-macosx/release/mlx.metallib ] && \
+            cp swift/.build/arm64-apple-macosx/release/mlx.metallib "$BOTTLE_DIR/lib/"
+
+          # Copy Python plugin
+          cp vllm_swift/*.py "$BOTTLE_DIR/libexec/vllm_swift/"
+          cp pyproject.toml "$BOTTLE_DIR/libexec/"
+          cp scripts/*.sh "$BOTTLE_DIR/libexec/scripts/" 2>/dev/null || true
+
+          # Create wrapper script
+          cat > "$BOTTLE_DIR/bin/vllm-swift" << 'WRAPPER'
+          #!/usr/bin/env bash
+          PREFIX="$(cd "$(dirname "$0")/.." && pwd)"
+          export DYLD_LIBRARY_PATH="$PREFIX/lib:${DYLD_LIBRARY_PATH:-}"
+          VENV_DIR="$HOME/.vllm-swift/venv"
+
+          _ensure_venv() {
+            if [ ! -d "$VENV_DIR" ]; then
+              echo "Setting up vllm-swift Python environment (one time)..."
+              python3 -m venv "$VENV_DIR"
+              "$VENV_DIR/bin/pip" install -q torch --index-url https://download.pytorch.org/whl/cpu
+              "$VENV_DIR/bin/pip" install -q "vllm>=0.19.0"
+              "$VENV_DIR/bin/pip" install -q -e "$PREFIX/libexec"
+              echo "Setup complete."
+            fi
+          }
+
+          case "${1:-}" in
+            serve)
+              _ensure_venv
+              shift
+              exec "$VENV_DIR/bin/python3" -m vllm.entrypoints.openai.api_server "$@"
+              ;;
+            download)
+              _ensure_venv
+              shift
+              MODEL="${1:?Usage: vllm-swift download <model-id>}"
+              SHORT="$(basename "$MODEL")"
+              exec "$VENV_DIR/bin/python3" -c "
+          from huggingface_hub import snapshot_download; import os
+          p = snapshot_download('$MODEL', local_dir=os.path.expanduser('~/models/$SHORT'))
+          print(f'Downloaded to {p}')
+          "
+              ;;
+            setup)
+              _ensure_venv
+              echo "vllm-swift environment ready at $VENV_DIR"
+              ;;
+            version)
+              echo "vllm-swift 0.1.0"
+              echo "dylib: $PREFIX/lib/libVLLMBridge.dylib"
+              [ -d "$VENV_DIR" ] && "$VENV_DIR/bin/python3" -c "import vllm; print(f'vLLM: {vllm.__version__}')" 2>/dev/null
+              ;;
+            *)
+              echo "vllm-swift — Native Swift/Metal backend for vLLM on Apple Silicon"
+              echo ""
+              echo "Usage:"
+              echo "  vllm-swift serve <model> [args]   Start OpenAI-compatible API server"
+              echo "  vllm-swift download <model-id>    Download model from HuggingFace"
+              echo "  vllm-swift setup                  Set up Python environment"
+              echo "  vllm-swift version                Show version info"
+              echo ""
+              echo "Examples:"
+              echo "  vllm-swift download mlx-community/Qwen3-4B-4bit"
+              echo "  vllm-swift serve ~/models/Qwen3-4B-4bit --max-model-len 2048"
+              ;;
+          esac
+          WRAPPER
+          chmod +x "$BOTTLE_DIR/bin/vllm-swift"
+
+          # Create bottle tarball
+          cd /tmp/bottle
+          tar czf /tmp/vllm-swift--${VERSION}.arm64_sequoia.bottle.tar.gz vllm-swift/
+          ls -lh /tmp/vllm-swift--${VERSION}.arm64_sequoia.bottle.tar.gz
 
       - name: Upload bottle artifact
         uses: actions/upload-artifact@v4
         with:
           name: bottle
-          path: |
-            *.bottle.*
-            *.json
+          path: /tmp/vllm-swift--*.bottle.tar.gz
 
       - name: Create release and upload bottle
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Create or update the bottles release
           gh release create bottles --title "Bottles" --notes "Prebuilt Homebrew bottles" 2>/dev/null || true
-
-          # Upload bottle files
-          for f in *.bottle.tar.gz; do
-            [ -f "$f" ] || continue
+          for f in /tmp/vllm-swift--*.bottle.tar.gz; do
             gh release upload bottles "$f" --clobber
           done
+          echo "Bottle uploaded to releases"
