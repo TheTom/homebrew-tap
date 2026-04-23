@@ -16,13 +16,15 @@ jobs:
         uses: Homebrew/actions/setup-homebrew@main
 
       - name: Tap and build bottle
+        env:
+          HOMEBREW_NO_SANDBOX: 1
         run: |
           # Link this checkout into Homebrew's tap directory
           TAP_DIR="$(brew --repository)/Library/Taps/thetom/homebrew-tap"
           rm -rf "$TAP_DIR"
           ln -s "$GITHUB_WORKSPACE" "$TAP_DIR"
 
-          # Build the formula as a bottle
+          # Build the formula as a bottle (no sandbox — Swift SPM needs filesystem access)
           brew install --build-bottle TheTom/tap/vllm-swift
 
           # Create the bottle tarball
