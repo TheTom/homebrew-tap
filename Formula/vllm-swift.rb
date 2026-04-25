@@ -16,7 +16,7 @@ class VllmSwift < Formula
 
   bottle do
     root_url "https://github.com/TheTom/homebrew-tap/releases/download/bottles"
-    sha256 cellar: :any, arm64_sequoia: "2fad56f88a78195ee9aa8193fd59f290c1ebebc28140c13159bbe9f90e37ca1e"
+    sha256 cellar: :any, arm64_sequoia: "dff4ce04ed4a894c298516aa48e75b57ebda34c167070ef2f4211697462b79d5"
   end
 
   depends_on xcode: ["15.0", :build]
