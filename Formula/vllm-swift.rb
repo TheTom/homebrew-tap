@@ -11,13 +11,12 @@ class VllmSwift < Formula
   desc "Native Swift/Metal backend for vLLM on Apple Silicon"
   homepage "https://github.com/TheTom/vllm-swift"
   url "https://github.com/TheTom/vllm-swift.git", branch: "main"
-  version "0.4.2"
+  version "0.5.2"
   license "Apache-2.0"
 
   bottle do
     root_url "https://github.com/TheTom/homebrew-tap/releases/download/bottles"
-    sha256 cellar: :any, arm64_tahoe:   "246f47e89ab112eb06886ceaa734fb3b48b6de559315621dd920182080001604"
-    sha256 cellar: :any, arm64_sequoia: "246f47e89ab112eb06886ceaa734fb3b48b6de559315621dd920182080001604"
+    sha256 cellar: :any, arm64_tahoe: "4c4db16055dcb07a84499ce3f438a3ed9bb163d47ac2443e5e322c848d12ac14"
   end
 
   depends_on xcode: ["15.0", :build]
@@ -85,16 +84,12 @@ class VllmSwift < Formula
       case "${1:-}" in
         serve)
           shift
-          # Delegate to the Python CLI (vllm_swift.cli). It owns the
-          # full auto-detect + invisible self-heal stack as of v0.4.0:
+          # Delegate to the Python CLI (vllm_swift.cli). It owns the full
+          # auto-detect + invisible self-heal stack as of v0.4.0:
           #   - tool + reasoning parser detection (3-layer)
           #   - pre-flight registry validation
           #   - rewriter proxy for max_tokens rescue, Thinking: split,
           #     plaintext-JSON tool-call recovery (streaming + non-streaming)
-          # Keeping the bash wrapper as a thin shim that only sets up
-          # DYLD_LIBRARY_PATH + venv routing means the bottle inherits
-          # every v0.4.0+ feature automatically without re-implementing
-          # parser logic in two places.
           exec "$VENV_PYTHON" -m vllm_swift.cli serve "$@"
           ;;
         download)
@@ -114,23 +109,35 @@ class VllmSwift < Formula
           exec "#{libexec}/scripts/integration_test.sh" "$@"
           ;;
         version)
-          echo "vllm-swift 0.4.2"
+          echo "vllm-swift 0.5.2"
           echo "dylib: #{lib}/libVLLMBridge.dylib"
           "$VENV_PYTHON" -c "import vllm; print(f'vLLM: {vllm.__version__}')" 2>/dev/null || true
+          "$VENV_PYTHON" -c "import longctx_svc; print(f'longctx-svc: {longctx_svc.__version__}')" 2>/dev/null || echo "longctx-svc: not installed (pip install longctx-svc to enable --enable-longctx)"
+          ;;
+        longctx-install)
+          # Convenience: install the optional longctx companion into the
+          # managed venv so `--enable-longctx` Just Works.
+          shift
+          echo "Installing longctx-svc (alpha) into vllm-swift's managed venv..."
+          exec "$VENV_PYTHON" -m pip install longctx-svc "$@"
           ;;
         *)
           echo "vllm-swift — Native Swift/Metal backend for vLLM on Apple Silicon"
           echo ""
           echo "Usage:"
-          echo "  vllm-swift serve <model> [args]   Start OpenAI-compatible API server"
-          echo "  vllm-swift download <model-id>    Download model from HuggingFace"
-          echo "  vllm-swift test [model_path]      Run integration test"
-          echo "  vllm-swift version                Show version info"
+          echo "  vllm-swift serve <model> [args]    Start OpenAI-compatible API server"
+          echo "  vllm-swift download <model-id>     Download model from HuggingFace"
+          echo "  vllm-swift longctx-install         Install the optional longctx companion"
+          echo "  vllm-swift test [model_path]       Run integration test"
+          echo "  vllm-swift version                 Show version info"
           echo ""
           echo "Examples:"
           echo "  vllm-swift download mlx-community/Qwen3-4B-4bit"
           echo "  vllm-swift serve ~/models/Qwen3-4B-4bit --max-model-len 2048"
           echo "  vllm-swift serve ~/models/Qwen3-4B-4bit --max-model-len 4096 --port 8080"
+          echo ""
+          echo "  # one-command retrieval (after \`vllm-swift longctx-install\`):"
+          echo "  vllm-swift serve ~/models/Qwen3-4B-4bit --enable-longctx"
           ;;
       esac
     EOS
@@ -145,12 +152,18 @@ class VllmSwift < Formula
         vllm-swift serve ~/models/Qwen3-4B-4bit --max-model-len 2048
 
       The server exposes an OpenAI-compatible API at http://localhost:8000
+
+      Optional: enable retrieval-augmented context with TheTom/longctx
+      (alpha). One-time install, then a single flag on serve:
+        vllm-swift longctx-install
+        vllm-swift serve ~/models/Qwen3-4B-4bit --enable-longctx
+      (sidecar boots automatically; tears down with vllm-swift)
     EOS
   end
 
   test do
     assert_predicate lib/"libVLLMBridge.dylib", :exist?
     assert_match "vllm-swift", shell_output("#{bin}/vllm-swift")
-    assert_match "0.4.2", shell_output("#{bin}/vllm-swift version")
+    assert_match "0.5.2", shell_output("#{bin}/vllm-swift version")
   end
 end
