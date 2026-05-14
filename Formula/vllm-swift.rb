@@ -11,12 +11,12 @@ class VllmSwift < Formula
   desc "Native Swift/Metal backend for vLLM on Apple Silicon"
   homepage "https://github.com/TheTom/vllm-swift"
   url "https://github.com/TheTom/vllm-swift.git", branch: "main"
-  version "0.6.2"
+  version "0.6.3"
   license "Apache-2.0"
 
   bottle do
     root_url "https://github.com/TheTom/homebrew-tap/releases/download/bottles"
-    sha256 cellar: :any, arm64_tahoe:   "cf9f4f9622ae25028d2647fd4eea53d9d5d147efdbe250a0e3fdc9d1fc7e2b52"
+    sha256 cellar: :any, arm64_tahoe:   "e3ff801ce6e4601208c674eddfa133b833873a75c11cc32b77a8bb998f0303c0"
     # arm64_sequoia + arm64_sonoma SHAs to be filled by mirror builds on
     # those macOS versions. Until then, sequoia / sonoma users build from
     # source (HOMEBREW_NO_SANDBOX=1 brew install vllm-swift).
@@ -112,7 +112,7 @@ class VllmSwift < Formula
           exec "#{libexec}/scripts/integration_test.sh" "$@"
           ;;
         version)
-          echo "vllm-swift 0.5.4"
+          echo "vllm-swift 0.6.3"
           echo "dylib: #{lib}/libVLLMBridge.dylib"
           "$VENV_PYTHON" -c "import vllm; print(f'vLLM: {vllm.__version__}')" 2>/dev/null || true
           "$VENV_PYTHON" -c "import longctx_svc; print(f'longctx-svc: {longctx_svc.__version__}')" 2>/dev/null || echo "longctx-svc: not installed (pip install longctx-svc to enable --enable-longctx)"
@@ -167,6 +167,6 @@ class VllmSwift < Formula
   test do
     assert_predicate lib/"libVLLMBridge.dylib", :exist?
     assert_match "vllm-swift", shell_output("#{bin}/vllm-swift")
-    assert_match "0.5.4", shell_output("#{bin}/vllm-swift version")
+    assert_match "0.6.3", shell_output("#{bin}/vllm-swift version")
   end
 end
